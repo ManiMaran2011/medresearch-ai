@@ -4,7 +4,7 @@ import {v4 as uuidv4} from 'uuid';
 import {AreaChart,Area,XAxis,YAxis,Tooltip,ResponsiveContainer} from 'recharts';
 import './App.css';
 
-const API='http://localhost:5000/api';
+const API='https://medresearch-ai.onrender.com/api';
 const post=(url,body)=>fetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 
 // Icons
