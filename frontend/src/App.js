@@ -4,7 +4,7 @@ import {v4 as uuidv4} from 'uuid';
 import {AreaChart,Area,XAxis,YAxis,Tooltip,ResponsiveContainer} from 'recharts';
 import './App.css';
 
-const API='https://medresearch-ai.onrender.com/api';
+const API='http://localhost:5000/api';
 const post=(url,body)=>fetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 
 // Icons
@@ -410,17 +410,54 @@ export default function App(){
   const[prog,setProg]=useState(0);
   const[loading,setLoading]=useState(false);
   const[input,setInput]=useState('');
-  const[sid]=useState(()=>uuidv4());
-  const[ctx,setCtx]=useState({});
+  const[sid]=useState(()=>{
+    const existing=localStorage.getItem('medresearch_sid');
+    if(existing)return existing;
+    const newId=uuidv4();
+    localStorage.setItem('medresearch_sid',newId);
+    return newId;
+  });
+  const[ctx,setCtx]=useState(()=>{
+    try{const saved=localStorage.getItem('medresearch_ctx');return saved?JSON.parse(saved):{};}catch{return {};}
+  });
   const[showCtx,setShowCtx]=useState(false);
   const[sidebar,setSidebar]=useState(true);
   const[sessions,setSessions]=useState([]);
   const[err,setErr]=useState('');
   const[lastQ,setLastQ]=useState('');
+  const[restoring,setRestoring]=useState(true);
   const endRef=useRef(null);const inRef=useRef(null);const stepsRef=useRef([]);
   const{on:voiceOn,start:voiceStart,stop:voiceStop}=useVoice(t=>setInput(t));
 
+  // Restore session on page load
+  useEffect(()=>{
+    const restore=async()=>{
+      try{
+        const res=await fetch(`${API.replace('/api','')}/api/sessions/${sid}`);
+        const data=await res.json();
+        if(data.messages?.length>0){
+          const restored=data.messages.map(m=>({
+            role:m.role,content:m.content,
+            metadata:m.metadata||{}
+          }));
+          setMsgs(restored);
+        }
+        if(data.patientContext&&Object.keys(data.patientContext).length>0){
+          setCtx(data.patientContext);
+          localStorage.setItem('medresearch_ctx',JSON.stringify(data.patientContext));
+        }
+      }catch{}
+      setRestoring(false);
+    };
+    restore();
+  },[]);
+
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth'});},[msgs,steps,loading]);
+
+  // Save ctx to localStorage whenever it changes
+  useEffect(()=>{
+    if(Object.keys(ctx).length>0)localStorage.setItem('medresearch_ctx',JSON.stringify(ctx));
+  },[ctx]);
 
   const send=useCallback(async(text)=>{
     const msg=(text||input).trim();if(!msg||loading)return;
@@ -468,7 +505,7 @@ export default function App(){
     <aside className={`sidebar ${!sidebar?'closed':''}`}>
       <div className="sb-header">
         <div className="sb-brand"><div className="sb-logo"><Ic.Dna/></div><div><p className="sb-name">MedResearch AI</p><p className="sb-llm">Llama 3.3 70B · Open Source</p></div></div>
-        <button className="sb-new" onClick={()=>{setMsgs([]);setSteps([]);setErr('');setLastQ('');}}><Ic.Plus/> New session</button>
+        <button className="sb-new" onClick={()=>{const newId=uuidv4();localStorage.setItem('medresearch_sid',newId);localStorage.removeItem('medresearch_ctx');window.location.reload();}}><Ic.Plus/> New session</button>
       </div>
       <div className="sb-body">
         <p className="sb-section-label">Sessions</p>
@@ -495,7 +532,9 @@ export default function App(){
 
       <div className="body-wrap">
         <div className="chat-scroll">
-          {msgs.length===0?(
+          {restoring?(
+            <div className="welcome"><p style={{fontSize:13,color:'var(--t3)'}}>Restoring session...</p></div>
+          ):msgs.length===0?(
             <div className="welcome">
               <div style={{textAlign:'center'}}><div className="w-icon"><Ic.Dna/></div><h2 className="w-title">MedResearch AI</h2><p className="w-sub">Powered by <strong>Llama 3.3 70B</strong> open source. Live research from PubMed, OpenAlex, ClinicalTrials.gov and OpenFDA. Get an analysis then explore with 4 guided research paths.</p></div>
               <div style={{width:'100%',maxWidth:460}}><p style={{fontSize:9,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--t3)',textAlign:'center',marginBottom:7}}>Quick searches</p><div className="qp-grid">{QPS.map((q,i)=><button key={i} className="qp-btn" onClick={()=>send(q.q)}><span style={{fontSize:18}}>{q.e}</span>{q.l}</button>)}</div></div>

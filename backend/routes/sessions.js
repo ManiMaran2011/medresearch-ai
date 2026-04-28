@@ -15,6 +15,15 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Fetch full session by ID — used for refresh restore
+router.get('/:id', async (req, res) => {
+  try {
+    const session = await Session.findOne({ sessionId: req.params.id }).lean();
+    if (!session) return res.json({ messages: [], patientContext: {} });
+    res.json({ messages: session.messages || [], patientContext: session.patientContext || {} });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.delete('/:id', async (req, res) => {
   try {
     await Session.deleteOne({ sessionId: req.params.id });
