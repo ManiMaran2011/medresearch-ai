@@ -410,7 +410,7 @@ export default function App(){
   const[prog,setProg]=useState(0);
   const[loading,setLoading]=useState(false);
   const[input,setInput]=useState('');
-  const[sid]=useState(()=>{
+  const[sid,setSid]=useState(()=>{
     const existing=localStorage.getItem('medresearch_sid');
     if(existing)return existing;
     const newId=uuidv4();
@@ -429,28 +429,56 @@ export default function App(){
   const endRef=useRef(null);const inRef=useRef(null);const stepsRef=useRef([]);
   const{on:voiceOn,start:voiceStart,stop:voiceStop}=useVoice(t=>setInput(t));
 
-  // Restore session on page load
+  // Load a session by ID into state
+  const loadSession=async(sessionId)=>{
+    setRestoring(true);setMsgs([]);setErr('');setLastQ('');setSteps([]);setProg(0);
+    try{
+      const res=await fetch(`${API.replace('/api','')}/api/sessions/${sessionId}`);
+      const data=await res.json();
+      if(data.messages?.length>0){
+        setMsgs(data.messages.map(m=>({role:m.role,content:m.content,metadata:m.metadata||{}})));
+      }
+      if(data.patientContext&&Object.keys(data.patientContext).length>0){
+        setCtx(data.patientContext);
+        localStorage.setItem('medresearch_ctx',JSON.stringify(data.patientContext));
+      }
+    }catch{}
+    setRestoring(false);
+  };
+
+  // Fetch all sessions for sidebar
+  const fetchAllSessions=async()=>{
+    try{
+      const res=await fetch(`${API.replace('/api','')}/api/sessions`);
+      const data=await res.json();
+      if(Array.isArray(data))setSessions(data);
+    }catch{}
+  };
+
+  // On startup — restore current session + load all sessions for sidebar
   useEffect(()=>{
-    const restore=async()=>{
-      try{
-        const res=await fetch(`${API.replace('/api','')}/api/sessions/${sid}`);
-        const data=await res.json();
-        if(data.messages?.length>0){
-          const restored=data.messages.map(m=>({
-            role:m.role,content:m.content,
-            metadata:m.metadata||{}
-          }));
-          setMsgs(restored);
-        }
-        if(data.patientContext&&Object.keys(data.patientContext).length>0){
-          setCtx(data.patientContext);
-          localStorage.setItem('medresearch_ctx',JSON.stringify(data.patientContext));
-        }
-      }catch{}
-      setRestoring(false);
+    const init=async()=>{
+      await Promise.all([loadSession(sid),fetchAllSessions()]);
     };
-    restore();
+    init();
   },[]);
+
+  // New session — save current, start fresh
+  const newSession=()=>{
+    const newId=uuidv4();
+    localStorage.setItem('medresearch_sid',newId);
+    localStorage.removeItem('medresearch_ctx');
+    setSid(newId);setMsgs([]);setCtx({});setErr('');setLastQ('');setSteps([]);setProg(0);
+    fetchAllSessions();
+  };
+
+  // Switch to existing session
+  const switchSession=async(sessionId)=>{
+    if(sessionId===sid)return;
+    localStorage.setItem('medresearch_sid',sessionId);
+    setSid(sessionId);
+    await loadSession(sessionId);
+  };
 
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:'smooth'});},[msgs,steps,loading]);
 
@@ -482,6 +510,7 @@ export default function App(){
               stepsRef.current=stepsRef.current.map(s=>({...s,done:true,active:false}));setSteps([...stepsRef.current]);setProg(100);
               setMsgs(prev=>[...prev,{role:'assistant',content:p.response,metadata:{publications:p.publications,clinicalTrials:p.clinicalTrials,drugInteractions:p.drugInteractions,followUps:p.followUps,expandedQuery:p.metadata?.expandedQuery,processingTime:p.metadata?.processingTime,totalFetched:p.metadata?.totalFetched,disease:ctx.disease||''}}]);
               setSessions(prev=>[{sessionId:sid,patientContext:ctx,preview:msg.slice(0,60),updatedAt:new Date()},...prev.filter(s=>s.sessionId!==sid)].slice(0,15));
+              fetchAllSessions();
               setTimeout(()=>{setSteps([]);setProg(0);},2500);
             }
             if(ev==='error')setErr(p.message);
@@ -505,12 +534,17 @@ export default function App(){
     <aside className={`sidebar ${!sidebar?'closed':''}`}>
       <div className="sb-header">
         <div className="sb-brand"><div className="sb-logo"><Ic.Dna/></div><div><p className="sb-name">MedResearch AI</p><p className="sb-llm">Llama 3.3 70B · Open Source</p></div></div>
-        <button className="sb-new" onClick={()=>{const newId=uuidv4();localStorage.setItem('medresearch_sid',newId);localStorage.removeItem('medresearch_ctx');window.location.reload();}}><Ic.Plus/> New session</button>
+        <button className="sb-new" onClick={newSession}><Ic.Plus/> New session</button>
       </div>
       <div className="sb-body">
         <p className="sb-section-label">Sessions</p>
         {sessions.length===0&&<p style={{fontSize:10,color:'var(--t3)'}}>No sessions yet</p>}
-        {sessions.map(s=><div key={s.sessionId} className={`sb-item ${s.sessionId===sid?'active':''}`}><p className="sb-disease">{s.patientContext?.disease||'Research session'}</p><p className="sb-preview">{s.preview}</p></div>)}
+        {sessions.map(s=>(
+          <div key={s.sessionId} className={`sb-item ${s.sessionId===sid?'active':''}`} onClick={()=>switchSession(s.sessionId)}>
+            <p className="sb-disease">{s.patientContext?.disease||'Research session'}</p>
+            <p className="sb-preview">{s.preview||'No messages yet'}</p>
+          </div>
+        ))}
       </div>
     </aside>
 
